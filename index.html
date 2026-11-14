@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#080808">
+    <title>كاميرا</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="camera-app">
+
+    <header>
+        <span class="app-title">كاميرا</span>
+        <button id="galleryBtn">▣ <span id="photoCount">0</span></button>
+    </header>
+
+    <main class="camera-screen">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="canvas"></canvas>
+        <div class="flash" id="flash"></div>
+
+        <div class="camera-message" id="message">
+            اضغط على تشغيل الكاميرا
+        </div>
+    </main>
+
+    <section class="controls">
+
+        <div class="tools">
+            <button id="switchBtn">🔄</button>
+            <button id="timerBtn">⏱</button>
+            <button id="gridBtn">▦</button>
+            <button id="filterBtn">🎨</button>
+        </div>
+
+        <div class="zoom">
+            <span>1x</span>
+            <input type="range" id="zoom" min="1" max="3" step="0.1" value="1">
+            <span>3x</span>
+        </div>
+
+        <div class="capture-controls">
+            <button id="gallerySmall">▣</button>
+            <button id="captureBtn" class="capture"></button>
+            <button id="recordBtn">●</button>
+        </div>
+
+        <button id="startBtn" class="start">
+            تشغيل الكاميرا
+        </button>
+
+    </section>
+
+</div>
+
+<div id="gallery" class="gallery hidden">
+    <div class="gallery-header">
+        <h2>معرض الصور</h2>
+        <button id="closeGallery">✕</button>
+    </div>
+    <div id="galleryItems"></div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
