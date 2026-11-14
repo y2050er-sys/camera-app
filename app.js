@@ -14,11 +14,11 @@ const zoom = document.getElementById("zoom");
 const flash = document.getElementById("flash");
 
 let stream = null;
+let microphoneStream = null;
 let facing = "environment";
 let mediaRecorder = null;
 let recording = false;
 let recordedParts = [];
-let photos = [];
 let filterIndex = 0;
 let timer = 0;
 let db = null;
@@ -33,7 +33,7 @@ const filters = [
     "hue-rotate(90deg)"
 ];
 
-// رسائل التطبيق
+// عرض الرسائل
 function showMessage(text) {
     message.textContent = text;
     message.style.display = "block";
@@ -43,7 +43,14 @@ function hideMessage() {
     message.style.display = "none";
 }
 
-// قاعدة بيانات المعرض
+// إيقاف الكاميرا والميكروفون
+function stopStream(mediaStream) {
+    if (mediaStream) {
+        mediaStream.getTracks().forEach(track => track.stop());
+    }
+}
+
+// إنشاء قاعدة بيانات المعرض
 const dbRequest = indexedDB.open("CameraAppDB", 1);
 
 dbRequest.onupgradeneeded = event => {
@@ -66,50 +73,38 @@ dbRequest.onerror = () => {
     alert("تعذر فتح معرض الصور.");
 };
 
-// تشغيل الكاميرا والميكروفون
+// تشغيل الكاميرا فقط دون الميكروفون
 async function startCamera() {
 
     if (!navigator.mediaDevices ||
         !navigator.mediaDevices.getUserMedia) {
 
-        showMessage("متصفحك لا يدعم الكاميرا. استخدم اتصال HTTPS.");
+        showMessage("متصفحك لا يدعم تشغيل الكاميرا. تأكد من فتح الموقع عبر HTTPS.");
         return;
     }
 
+    if (startBtn) startBtn.disabled = true;
+
     try {
 
-        startBtn.disabled = true;
-        showMessage("جارٍ طلب إذن الكاميرا والميكروفون...");
+        showMessage("جارٍ تشغيل الكاميرا...");
 
-        if (stream) {
-            stream.getTracks().forEach(track => track.stop());
-            stream = null;
-        }
+        stopStream(stream);
+        stream = null;
 
         stream = await navigator.mediaDevices.getUserMedia({
 
             video: {
-                facingMode: {
-                    ideal: facing
-                },
-                width: {
-                    ideal: 1920
-                },
-                height: {
-                    ideal: 1080
-                }
+                facingMode: { ideal: facing },
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
             },
 
-            audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true
-            }
+            audio: false
 
         });
 
         video.srcObject = stream;
-
         video.muted = true;
         video.playsInline = true;
 
@@ -117,41 +112,46 @@ async function startCamera() {
 
         hideMessage();
 
-        startBtn.style.display = "none";
-
-        const audioTrack = stream.getAudioTracks()[0];
-
-        if (audioTrack) {
-            console.log("الميكروفون يعمل:", audioTrack.label);
+        if (startBtn) {
+            startBtn.style.display = "none";
         }
 
     } catch (error) {
 
         console.error("Camera Error:", error);
 
-        if (error.name === "NotAllowedError") {
-            showMessage("لم تسمح باستخدام الكاميرا أو الميكروفون. راجع أذونات الموقع.");
+        if (error.name === "NotAllowedError" ||
+            error.name === "SecurityError") {
+
+            showMessage("لم يُسمح للموقع باستخدام الكاميرا. راجع أذونات الموقع أو قيود مسؤول التابلت.");
+
+        } else if (error.name === "NotFoundError") {
+
+            showMessage("لم يتم العثور على كاميرا متاحة على الجهاز.");
+
+        } else if (error.name === "NotReadableError") {
+
+            showMessage("تعذر الوصول إلى الكاميرا. قد تكون مشغولة أو محجوبة بسياسة الجهاز.");
+
+        } else if (error.name === "OverconstrainedError") {
+
+            showMessage("الكاميرا لا تدعم الإعدادات المطلوبة.");
+
+        } else {
+
+            showMessage("حدث خطأ أثناء تشغيل الكاميرا: " +
+                (error.message || error.name));
+
         }
 
-        else if (error.name === "NotFoundError") {
-            showMessage("لم يتم العثور على كاميرا أو ميكروفون.");
-        }
-
-        else if (error.name === "NotReadableError") {
-            showMessage("الكاميرا أو الميكروفون مستخدم بالفعل في تطبيق آخر.");
-        }
-
-        else if (error.name === "OverconstrainedError") {
-            showMessage("تعذر تشغيل الكاميرا بالإعدادات المطلوبة.");
-        }
-
-        else {
-            showMessage("حدث خطأ أثناء تشغيل الكاميرا والميكروفون.");
-        }
+        stopStream(stream);
+        stream = null;
 
     } finally {
 
-        startBtn.disabled = false;
+        if (startBtn) {
+            startBtn.disabled = false;
+        }
 
     }
 }
@@ -173,8 +173,13 @@ captureBtn.addEventListener("click", async () => {
         if (timer > 0) {
 
             for (let i = timer; i > 0; i--) {
+
                 showMessage("التقاط الصورة بعد " + i);
-                await new Promise(resolve => setTimeout(resolve, 1000));
+
+                await new Promise(resolve =>
+                    setTimeout(resolve, 1000)
+                );
+
             }
 
             hideMessage();
@@ -204,9 +209,13 @@ captureBtn.addEventListener("click", async () => {
         canvas.toBlob(blob => {
 
             if (blob) {
+
                 saveMedia(blob, "image");
+
                 showMessage("تم التقاط الصورة بنجاح!");
+
                 setTimeout(hideMessage, 1200);
+
             }
 
         }, "image/jpeg", 0.95);
@@ -238,12 +247,17 @@ function saveMedia(blob, type) {
         return;
     }
 
-    const transaction = db.transaction("media", "readwrite");
+    const transaction = db.transaction(
+        "media",
+        "readwrite"
+    );
 
     transaction.objectStore("media").add({
+
         blob: blob,
         type: type,
         date: new Date().toISOString()
+
     });
 
     transaction.oncomplete = () => {
@@ -252,11 +266,11 @@ function saveMedia(blob, type) {
 
 }
 
-// تسجيل الفيديو بالصوت والصورة
-recordBtn.addEventListener("click", () => {
+// تسجيل الفيديو مع طلب الميكروفون عند التسجيل فقط
+recordBtn.addEventListener("click", async () => {
 
     if (!stream) {
-        alert("شغّل الكاميرا والميكروفون أولاً.");
+        alert("شغّل الكاميرا أولاً.");
         return;
     }
 
@@ -267,35 +281,57 @@ recordBtn.addEventListener("click", () => {
             return;
         }
 
-        const audioTracks = stream.getAudioTracks();
-
-        if (audioTracks.length === 0) {
-            alert("الميكروفون غير متصل. أعد تشغيل الكاميرا.");
-            return;
-        }
-
-        const supportedTypes = [
-            "video/webm;codecs=vp9,opus",
-            "video/webm;codecs=vp8,opus",
-            "video/webm"
-        ];
-
-        let selectedType = "";
-
-        for (const type of supportedTypes) {
-            if (MediaRecorder.isTypeSupported(type)) {
-                selectedType = type;
-                break;
-            }
-        }
-
         try {
+
+            showMessage("جارٍ تجهيز الميكروفون للتسجيل...");
+
+            microphoneStream =
+                await navigator.mediaDevices.getUserMedia({
+
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    },
+
+                    video: false
+
+                });
+
+            const combinedStream = new MediaStream([
+
+                ...stream.getVideoTracks(),
+                ...microphoneStream.getAudioTracks()
+
+            ]);
+
+            const supportedTypes = [
+
+                "video/webm;codecs=vp9,opus",
+                "video/webm;codecs=vp8,opus",
+                "video/webm"
+
+            ];
+
+            let selectedType = "";
+
+            for (const type of supportedTypes) {
+
+                if (MediaRecorder.isTypeSupported(type)) {
+                    selectedType = type;
+                    break;
+                }
+
+            }
 
             const options = selectedType
                 ? { mimeType: selectedType }
                 : {};
 
-            mediaRecorder = new MediaRecorder(stream, options);
+            mediaRecorder = new MediaRecorder(
+                combinedStream,
+                options
+            );
 
             recordedParts = [];
 
@@ -309,9 +345,12 @@ recordBtn.addEventListener("click", () => {
 
             mediaRecorder.onstop = () => {
 
-                const blob = new Blob(recordedParts, {
-                    type: mediaRecorder.mimeType || "video/webm"
-                });
+                const blob = new Blob(
+                    recordedParts,
+                    {
+                        type: mediaRecorder.mimeType || "video/webm"
+                    }
+                );
 
                 saveMedia(blob, "video");
 
@@ -319,11 +358,23 @@ recordBtn.addEventListener("click", () => {
 
                 setTimeout(hideMessage, 2000);
 
+                stopStream(microphoneStream);
+                microphoneStream = null;
+
             };
 
             mediaRecorder.onerror = event => {
+
                 console.error("Recording Error:", event.error);
-                alert("حدث خطأ أثناء تسجيل الفيديو.");
+
+                showMessage("حدث خطأ أثناء تسجيل الفيديو.");
+
+                stopStream(microphoneStream);
+                microphoneStream = null;
+
+                recording = false;
+                recordBtn.textContent = "●";
+
             };
 
             mediaRecorder.start();
@@ -336,19 +387,43 @@ recordBtn.addEventListener("click", () => {
 
         } catch (error) {
 
-            console.error(error);
-            alert("تعذر بدء تسجيل الفيديو.");
+            console.error("Microphone/Recording Error:", error);
+
+            stopStream(microphoneStream);
+            microphoneStream = null;
+
+            if (error.name === "NotAllowedError" ||
+                error.name === "SecurityError") {
+
+                showMessage("لم يُسمح باستخدام الميكروفون. راجع أذونات الموقع أو قيود مسؤول التابلت.");
+
+            } else if (error.name === "NotFoundError") {
+
+                showMessage("لم يتم العثور على ميكروفون متاح.");
+
+            } else if (error.name === "NotReadableError") {
+
+                showMessage("تعذر الوصول إلى الميكروفون.");
+
+            } else {
+
+                showMessage("تعذر بدء التسجيل: " +
+                    (error.message || error.name));
+
+            }
 
         }
 
     } else {
 
-        if (mediaRecorder && mediaRecorder.state !== "inactive") {
+        if (mediaRecorder &&
+            mediaRecorder.state !== "inactive") {
+
             mediaRecorder.stop();
+
         }
 
         recording = false;
-
         recordBtn.textContent = "●";
 
     }
@@ -391,9 +466,11 @@ zoom.addEventListener("input", async () => {
             const value = Number(zoom.value);
 
             await track.applyConstraints({
-                advanced: [{
-                    zoom: value
-                }]
+
+                advanced: [
+                    { zoom: value }
+                ]
+
             });
 
         } else {
@@ -451,7 +528,10 @@ function updateGallery() {
 
     if (!db) return;
 
-    const transaction = db.transaction("media", "readonly");
+    const transaction = db.transaction(
+        "media",
+        "readonly"
+    );
 
     const store = transaction.objectStore("media");
 
@@ -464,7 +544,8 @@ function updateGallery() {
         document.getElementById("photoCount").textContent =
             items.length;
 
-        const container = document.getElementById("galleryItems");
+        const container =
+            document.getElementById("galleryItems");
 
         container.innerHTML = "";
 
@@ -477,14 +558,18 @@ function updateGallery() {
             div.className = "gallery-item";
 
             const media = document.createElement(
-                item.type === "image" ? "img" : "video"
+                item.type === "image"
+                    ? "img"
+                    : "video"
             );
 
             media.src = url;
 
             if (item.type === "video") {
+
                 media.controls = true;
                 media.playsInline = true;
+
             }
 
             const download = document.createElement("button");
@@ -517,7 +602,9 @@ function updateGallery() {
                 const deleteTransaction =
                     db.transaction("media", "readwrite");
 
-                deleteTransaction.objectStore("media").delete(item.id);
+                deleteTransaction
+                    .objectStore("media")
+                    .delete(item.id);
 
                 deleteTransaction.oncomplete = updateGallery;
 
@@ -536,28 +623,35 @@ function updateGallery() {
 // فتح المعرض
 function openGallery() {
 
-    document.getElementById("gallery").classList.remove("hidden");
+    document.getElementById("gallery")
+        .classList.remove("hidden");
 
     updateGallery();
 
 }
 
-document.getElementById("galleryBtn").addEventListener("click", openGallery);
+document.getElementById("galleryBtn")
+    .addEventListener("click", openGallery);
 
-document.getElementById("gallerySmall").addEventListener("click", openGallery);
+document.getElementById("gallerySmall")
+    .addEventListener("click", openGallery);
 
 // إغلاق المعرض
-document.getElementById("closeGallery").addEventListener("click", () => {
+document.getElementById("closeGallery")
+    .addEventListener("click", () => {
 
-    document.getElementById("gallery").classList.add("hidden");
+        document.getElementById("gallery")
+            .classList.add("hidden");
 
-});
+    });
 
-// إيقاف الكاميرا عند مغادرة الصفحة
+// إيقاف الكاميرا والميكروفون عند مغادرة الصفحة
 window.addEventListener("pagehide", () => {
 
-    if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-    }
+    stopStream(stream);
+    stopStream(microphoneStream);
+
+    stream = null;
+    microphoneStream = null;
 
 });
