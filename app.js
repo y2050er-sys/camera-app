@@ -29,17 +29,19 @@ const filters = [
     "hue-rotate(90deg)"
 ];
 
-const dbRequest = indexedDB.open("CameraAppDB", 1);
+let db = null;
 
-let db;
+const dbRequest = indexedDB.open("CameraAppDB", 1);
 
 dbRequest.onupgradeneeded = event => {
     db = event.target.result;
 
-    db.createObjectStore("media", {
-        keyPath: "id",
-        autoIncrement: true
-    });
+    if (!db.objectStoreNames.contains("media")) {
+        db.createObjectStore("media", {
+            keyPath: "id",
+            autoIncrement: true
+        });
+    }
 };
 
 dbRequest.onsuccess = event => {
@@ -47,21 +49,47 @@ dbRequest.onsuccess = event => {
     updateGallery();
 };
 
+dbRequest.onerror = () => {
+    console.error("تعذر فتح قاعدة البيانات");
+};
+
 async function startCamera() {
     try {
+        if (!navigator.mediaDevices ||
+            !navigator.mediaDevices.getUserMedia) {
+            throw new Error("المتصفح لا يدعم تشغيل الكاميرا");
+        }
+
+        if (!window.isSecureContext) {
+            throw new Error("يجب فتح التطبيق باستخدام اتصال آمن HTTPS");
+        }
+
+        message.style.display = "block";
+        message.textContent = "جاري تشغيل الكاميرا...";
+
+        let newStream;
+
+        try {
+            newStream = await navigator.mediaDevices.getUserMedia({
+                audio: false,
+                video: {
+                    facingMode: { ideal: facing },
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                }
+            });
+        } catch (firstError) {
+            newStream = await navigator.mediaDevices.getUserMedia({
+                audio: false,
+                video: true
+            });
+        }
+
         if (stream) {
             stream.getTracks().forEach(track => track.stop());
         }
 
-        stream = await navigator.mediaDevices.getUserMedia({
-            audio: true,
-            video: {
-                facingMode: facing,
-                width: { ideal: 1920 },
-                height: { ideal: 1080 }
-            }
-        });
-
+        stream = newStream;
         video.srcObject = stream;
 
         await video.play();
@@ -70,7 +98,22 @@ async function startCamera() {
         startBtn.style.display = "none";
 
     } catch (error) {
-        alert("تعذر تشغيل الكاميرا. تحقق من الأذونات.");
+        message.style.display = "block";
+        message.textContent = "تعذر تشغيل الكاميرا";
+
+        let errorMessage = "حدث خطأ أثناء تشغيل الكاميرا.";
+
+        if (error.name === "NotAllowedError") {
+            errorMessage = "اسمح للموقع باستخدام الكاميرا من إعدادات المتصفح.";
+        } else if (error.name === "NotFoundError") {
+            errorMessage = "لم يتم العثور على كاميرا في الجهاز.";
+        } else if (error.name === "NotReadableError") {
+            errorMessage = "الكاميرا مستخدمة بواسطة تطبيق آخر.";
+        } else if (error.message) {
+            errorMessage = error.message;
+        }
+
+        alert(errorMessage);
         console.error(error);
     }
 }
@@ -78,7 +121,9 @@ async function startCamera() {
 startBtn.onclick = startCamera;
 
 captureBtn.onclick = async () => {
-    if (!stream) return alert("شغّل الكاميرا أولاً");
+    if (!stream) {
+        return alert("شغّل الكاميرا أولاً");
+    }
 
     if (timer > 0) {
         captureBtn.disabled = true;
@@ -104,11 +149,12 @@ captureBtn.onclick = async () => {
     }
 
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.filter = "none";
 
     canvas.toBlob(blob => {
-        saveMedia(blob, "image");
+        if (blob) saveMedia(blob, "image");
     }, "image/jpeg", 0.95);
 
     flash.style.opacity = "1";
@@ -119,6 +165,10 @@ captureBtn.onclick = async () => {
 };
 
 function saveMedia(blob, type) {
+    if (!db) {
+        return alert("قاعدة البيانات لم تجهز بعد");
+    }
+
     const transaction = db.transaction("media", "readwrite");
 
     transaction.objectStore("media").add({
@@ -131,14 +181,24 @@ function saveMedia(blob, type) {
 }
 
 recordBtn.onclick = () => {
-    if (!stream) return alert("شغّل الكاميرا أولاً");
+    if (!stream) {
+        return alert("شغّل الكاميرا أولاً");
+    }
+
+    if (!window.MediaRecorder) {
+        return alert("تسجيل الفيديو غير مدعوم في هذا المتصفح");
+    }
 
     if (!recording) {
-        const mimeType = [
+        const types = [
             "video/webm;codecs=vp9",
             "video/webm",
             "video/mp4"
-        ].find(type => MediaRecorder.isTypeSupported(type));
+        ];
+
+        const mimeType = types.find(type =>
+            MediaRecorder.isTypeSupported(type)
+        );
 
         if (!mimeType) {
             return alert("تسجيل الفيديو غير مدعوم بهذا المتصفح");
@@ -151,11 +211,16 @@ recordBtn.onclick = () => {
         videos = [];
 
         mediaRecorder.ondataavailable = event => {
-            if (event.data.size) videos.push(event.data);
+            if (event.data.size) {
+                videos.push(event.data);
+            }
         };
 
         mediaRecorder.onstop = () => {
-            const blob = new Blob(videos, { type: mimeType });
+            const blob = new Blob(videos, {
+                type: mimeType
+            });
+
             saveMedia(blob, "video");
         };
 
@@ -170,23 +235,25 @@ recordBtn.onclick = () => {
     }
 };
 
-switchBtn.onclick = () => {
+switchBtn.onclick = async () => {
     facing = facing === "environment" ? "user" : "environment";
-    startCamera();
+    await startCamera();
 };
 
 zoom.oninput = () => {
     const track = stream?.getVideoTracks()[0];
+
     if (!track) return;
 
-    const capabilities = track.getCapabilities();
+    const capabilities = track.getCapabilities?.();
 
-    if (capabilities.zoom) {
+    if (capabilities?.zoom) {
         const value = Number(zoom.value);
 
         track.applyConstraints({
             advanced: [{ zoom: value }]
         }).catch(console.error);
+
     } else {
         video.style.transform = `scale(${zoom.value})`;
     }
@@ -208,6 +275,7 @@ document.getElementById("gridBtn").onclick = () => {
 
 document.getElementById("timerBtn").onclick = () => {
     const choices = [0, 3, 5, 10];
+
     timer = choices[(choices.indexOf(timer) + 1) % choices.length];
 
     document.getElementById("timerBtn").textContent =
@@ -250,8 +318,11 @@ function updateGallery() {
 
             download.onclick = () => {
                 const a = document.createElement("a");
+
                 a.href = url;
-                a.download = `camera-${item.id}.${item.type === "image" ? "jpg" : "webm"}`;
+                a.download =
+                    `camera-${item.id}.${item.type === "image" ? "jpg" : "webm"}`;
+
                 a.click();
             };
 
